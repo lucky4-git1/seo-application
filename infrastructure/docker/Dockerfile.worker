@@ -1,0 +1,7 @@
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /srv/api
+COPY apps/api/pyproject.toml ./
+RUN pip install --no-cache-dir fastapi pydantic pydantic-settings sqlalchemy alembic "psycopg[binary]" redis celery "python-jose[cryptography]" argon2-cffi httpx email-validator beautifulsoup4 lxml reportlab
+COPY apps/api/ ./
+CMD ["celery", "-A", "app.celery_app.celery", "worker", "--loglevel=info"]

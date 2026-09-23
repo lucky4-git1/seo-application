@@ -1,0 +1,8 @@
+# Web dev server (Vite). Prod uses a separate nginx-based image (Phase 12).
+FROM node:20-alpine
+WORKDIR /srv/web
+COPY apps/web/package.json ./
+RUN npm install --no-audit --no-fund
+COPY apps/web/ ./
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]

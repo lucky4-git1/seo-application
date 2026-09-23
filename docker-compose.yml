@@ -1,0 +1,96 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: seo
+      POSTGRES_PASSWORD: seo
+      POSTGRES_DB: seo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.api
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://seo:seo@postgres:5432/seo
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    ports:
+      - "8000:8000"
+    volumes:
+      - exports:/tmp/seo-exports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://seo:seo@postgres:5432/seo
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    volumes:
+      - exports:/tmp/seo-exports
+    depends_on:
+      - postgres
+      - redis
+      - api
+    command: celery -A app.celery_app.celery worker --loglevel=info
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://seo:seo@postgres:5432/seo
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      - worker
+    command: celery -A app.celery_app.celery beat --loglevel=info
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.web
+    environment:
+      VITE_API_PROXY: http://api:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  exports:

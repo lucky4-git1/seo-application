@@ -1,0 +1,23 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -e apps/api/dev 2>/dev/null || pip install fastapi pytest httpx argon2-cffi email-validator python-jose sqlalchemy
+        working-directory: .
+      - run: pytest
+        working-directory: apps/api
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+        working-directory: apps/web
+      - run: npm run typecheck
+        working-directory: apps/web

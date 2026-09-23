@@ -1,0 +1,41 @@
+# SEO Intelligence Platform — build outputs
+node_modules/
+dist/
+build/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env / secrets — never commit real secrets
+.env
+.env.development
+.env.production
+!.env.example
+docker-compose.override.yml
+
+# DB
+*.db
+*.sqlite*
+
+# Tauri / desktop bundles
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/desktop/dist/
+*.AppImage
+*.dmg
+*.msi
+*.exe
+
+# Misc
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
