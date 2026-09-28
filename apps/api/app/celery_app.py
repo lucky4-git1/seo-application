@@ -1,6 +1,8 @@
 """Celery app + job-type registry. Expensive work must go through here, never inline in requests."""
 from __future__ import annotations
 
+import os
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -39,6 +41,10 @@ def make_celery() -> Celery:
                 "schedule": crontab(hour=3, minute=0),
             },
         },
+        # No-broker local dev (no Redis): jobs run inline in the API process.
+        # Set CELERY_TASK_ALWAYS_EAGER=1. Never use in production.
+        task_always_eager=os.environ.get("CELERY_TASK_ALWAYS_EAGER", "").lower()
+        in ("1", "true", "yes"),
     )
     return app
 
