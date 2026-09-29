@@ -25,7 +25,7 @@ router = APIRouter(tags=["audits"])
 
 
 class AuditStart(BaseModel):
-    max_pages: int = Field(default=200, ge=1, le=500)
+    max_pages: int = Field(default=100, ge=1, le=500)
 
 
 def _require_member(db: Session, user_id: uuid.UUID, org_id: uuid.UUID):
@@ -33,6 +33,7 @@ def _require_member(db: Session, user_id: uuid.UUID, org_id: uuid.UUID):
 
 
 def _run_out(run: seo.CrawlRun) -> dict:
+    cfg = run.config or {}
     return {
         "id": str(run.id),
         "project_id": str(run.project_id),
@@ -41,6 +42,10 @@ def _run_out(run: seo.CrawlRun) -> dict:
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
         "pages_discovered": run.pages_discovered,
         "pages_crawled": run.pages_crawled,
+        "pages_failed": cfg.get("pages_failed", 0),
+        "phase": cfg.get("phase", run.status),
+        "speed": cfg.get("speed", 0.0),
+        "eta_seconds": cfg.get("eta_seconds", 0.0),
         "issues_found": run.issues_found,
         "health_score": run.health_score,
         "error": run.error,
@@ -71,10 +76,19 @@ def start_audit(request: Request, org_id: uuid.UUID, project_id: uuid.UUID, body
 
     _require_member(db, user.id, org_id)
     project = get_project_in_org(db, org_id, project_id)
+
+    # Audit lock: prevent starting another audit if one is currently active
+    active_run = db.query(seo.CrawlRun).filter(
+        seo.CrawlRun.project_id == project.id,
+        seo.CrawlRun.status.in_(("PENDING", "RUNNING", "DISCOVERING", "CRAWLING", "ANALYZING", "SCORING")),
+    ).first()
+    if active_run is not None:
+        raise HTTPException(status_code=409, detail="Audit already running")
+
     from app import entitlements
     max_pages = entitlements.clamp_crawl_pages(db, org_id, body.max_pages)
     run = seo.CrawlRun(organization_id=org_id, project_id=project.id,
-                       status="PENDING", config={"max_pages": max_pages})
+                       status="PENDING", config={"max_pages": max_pages, "phase": "PENDING"})
     db.add(run)
     db.flush()
     job = jobstore.create_job(db, organization_id=org_id, project_id=project.id,
@@ -186,3 +200,68 @@ def issue_urls(org_id: uuid.UUID, project_id: uuid.UUID, issue_id: uuid.UUID,
                        "detected_at": r.detected_at.isoformat()} for r in rows],
             "page": page, "page_size": page_size, "total": total,
             "affected_count": issue.affected_count}
+
+
+@router.post("/organizations/{org_id}/projects/{project_id}/audits/{run_id}/cancel")
+def cancel_audit(org_id: uuid.UUID, project_id: uuid.UUID, run_id: uuid.UUID,
+                 user: models.User = Depends(get_current_user),
+                 db: Session = Depends(get_db)):
+    _require_member(db, user.id, org_id)
+    project = get_project_in_org(db, org_id, project_id)
+    run = db.get(seo.CrawlRun, run_id)
+    if run is None or run.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    if run.status in ("COMPLETED", "FAILED", "CANCELLED"):
+        return {"ok": True, "status": run.status, "message": "Audit already finished"}
+    run.status = "CANCELLED"
+    cfg = dict(run.config or {})
+    cfg["phase"] = "CANCELLED"
+    run.config = cfg
+    db.commit()
+    return {"ok": True, "status": "CANCELLED"}
+
+
+@router.get("/organizations/{org_id}/projects/{project_id}/audits/{run_id}/pages")
+def list_pages(org_id: uuid.UUID, project_id: uuid.UUID, run_id: uuid.UUID,
+               user: models.User = Depends(get_current_user),
+               db: Session = Depends(get_db),
+               status_code: int | None = Query(None),
+               indexability: str | None = Query(None),
+               search: str | None = Query(None),
+               page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
+    _require_member(db, user.id, org_id)
+    project = get_project_in_org(db, org_id, project_id)
+    run = db.get(seo.CrawlRun, run_id)
+    if run is None or run.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    q = db.query(seo.CrawlPage).filter(seo.CrawlPage.crawl_run_id == run.id)
+    if status_code:
+        q = q.filter(seo.CrawlPage.status_code == status_code)
+    if indexability:
+        q = q.filter(seo.CrawlPage.indexability == indexability)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            (seo.CrawlPage.url.ilike(like)) |
+            (seo.CrawlPage.title.ilike(like)) |
+            (seo.CrawlPage.meta_description.ilike(like))
+        )
+    total = q.count()
+    rows = q.order_by(seo.CrawlPage.depth.asc(), seo.CrawlPage.id.asc()).offset((page - 1) * page_size).limit(page_size).all()
+    items = [{
+        "id": str(p.id),
+        "url": p.url,
+        "normalized_url": p.normalized_url,
+        "status_code": p.status_code,
+        "title": p.title,
+        "meta_description": p.meta_description,
+        "h1": p.h1_text[0] if p.h1_text and len(p.h1_text) > 0 else None,
+        "canonical": p.canonical,
+        "indexability": p.indexability,
+        "word_count": p.word_count,
+        "response_time_ms": p.response_time_ms,
+        "depth": p.depth,
+        "is_duplicate": p.is_duplicate,
+    } for p in rows]
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+

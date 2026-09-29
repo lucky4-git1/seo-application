@@ -76,7 +76,16 @@ def _reject_non_global(host_or_ip: str) -> None:
         raise UnsafeUrlError(f"non-routable IP: {host_or_ip}")
 
 
+_DNS_CACHE: dict[str, bool] = {}
+
+
+def clear_dns_cache() -> None:
+    _DNS_CACHE.clear()
+
+
 def _check_dns(host: str) -> None:
+    if host in _DNS_CACHE:
+        return
     try:
         infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
@@ -86,3 +95,4 @@ def _check_dns(host: str) -> None:
     for info in infos:
         addr = info[4][0]
         _reject_non_global(addr)
+    _DNS_CACHE[host] = True

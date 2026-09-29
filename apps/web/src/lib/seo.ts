@@ -5,6 +5,23 @@ export type AuditRun = {
   started_at: string | null; finished_at: string | null;
   pages_discovered: number; pages_crawled: number; issues_found: number;
   health_score: number | null; error: string | null; created_at: string | null;
+  pages_failed?: number; phase?: string; speed?: number; eta_seconds?: number;
+};
+
+export type CrawlPageRow = {
+  id: string;
+  url: string;
+  normalized_url: string;
+  status_code: number | null;
+  title: string | null;
+  meta_description: string | null;
+  h1: string | null;
+  canonical: string | null;
+  indexability: string;
+  word_count: number | null;
+  response_time_ms: number | null;
+  depth: number;
+  is_duplicate: boolean;
 };
 
 export type AuditDetail = AuditRun & {
@@ -75,8 +92,10 @@ const base = (org: string, proj: string) => `/api/v1/organizations/${org}/projec
 
 export const seo = {
   overview: (org: string, proj: string) => api.get<Overview>(`${base(org, proj)}/overview`),
-  startAudit: (org: string, proj: string, max_pages = 200) =>
+  startAudit: (org: string, proj: string, max_pages = 100) =>
     api.post<{ run: AuditRun; job: { id: string; status: string } }>(`${base(org, proj)}/audits`, { max_pages }),
+  cancelAudit: (org: string, proj: string, run: string) =>
+    api.post<{ ok: boolean; status: string }>(`${base(org, proj)}/audits/${run}/cancel`),
   audits: (org: string, proj: string, page = 1, page_size = 20) =>
     api.get<Page<AuditRun>>(`${base(org, proj)}/audits?page=${page}&page_size=${page_size}`),
   audit: (org: string, proj: string, run: string) =>
@@ -87,6 +106,10 @@ export const seo = {
   },
   issueUrls: (org: string, proj: string, issue: string, page = 1, page_size = 50) =>
     api.get<Page<{ url: string; detected_at: string }>>(`${base(org, proj)}/issues/${issue}/urls?page=${page}&page_size=${page_size}`),
+  pages: (org: string, proj: string, run: string, params: Record<string, string | number> = {}) => {
+    const q = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
+    return api.get<Page<CrawlPageRow>>(`${base(org, proj)}/audits/${run}/pages${q ? `?${q}` : ''}`);
+  },
 
   // providers (org scope)
   providerMeta: () => api.get<{ items: ProviderMeta[] }>('/api/v1/providers'),

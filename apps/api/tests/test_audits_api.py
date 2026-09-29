@@ -174,3 +174,39 @@ def test_project_overview_aggregates(monkeypatch):
     assert ov["audit"]["status"] == "COMPLETED"
     assert ov["audit"]["health_score"] is not None
     assert ov["latest_job"]["status"] == "COMPLETED"
+
+
+def test_audit_pages_and_cancel_endpoints(monkeypatch):
+    _setup(monkeypatch)
+    h = _auth_headers()
+    org = client.post("/api/v1/organizations", json={"name": "PagesOrg"}, headers=h).json()
+    proj = client.post(f"/api/v1/organizations/{org['id']}/projects",
+                       json={"name": "P", "domain": "example.org"}, headers=h).json()
+
+    # Start audit
+    r = client.post(
+        f"/api/v1/organizations/{org['id']}/projects/{proj['id']}/audits",
+        json={"max_pages": 10}, headers=h)
+    assert r.status_code == 202
+    run_id = r.json()["run"]["id"]
+
+    # Test pages endpoint
+    pages_res = client.get(
+        f"/api/v1/organizations/{org['id']}/projects/{proj['id']}/audits/{run_id}/pages",
+        headers=h)
+    assert pages_res.status_code == 200
+    pages_data = pages_res.json()
+    assert "items" in pages_data
+    assert len(pages_data["items"]) >= 1
+    p = pages_data["items"][0]
+    assert "url" in p
+    assert "status_code" in p
+    assert "indexability" in p
+
+    # Test cancellation endpoint on completed audit
+    cancel_res = client.post(
+        f"/api/v1/organizations/{org['id']}/projects/{proj['id']}/audits/{run_id}/cancel",
+        headers=h)
+    assert cancel_res.status_code == 200
+    assert cancel_res.json()["ok"] is True
+

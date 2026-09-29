@@ -131,3 +131,45 @@ def discover_seeds(base_url: str, *, max_sitemap_depth: int = 2) -> dict:
         queue.extend((u, depth + 1) for u in nested)
         time.sleep(0.1)
     return out
+
+
+async def async_discover_seeds(client, base_url: str, *, max_sitemap_depth: int = 2) -> dict:
+    """Asynchronously fetch robots.txt + sitemaps for a site using an AsyncClient."""
+    from app.crawler.fetch import async_fetch_url
+
+    parts = urlparse(base_url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    out = {"robots": {"disallows": [], "crawl_delay": None, "sitemaps": []},
+           "seed_urls": [], "error": None}
+    try:
+        res = await async_fetch_url(client, origin + "/robots.txt")
+    except Exception as exc:
+        out["error"] = str(exc)
+        return out
+    if res.error and res.status_code == 0 and "blocked" in (res.error or ""):
+        out["error"] = res.error
+        return out
+    if res.status_code == 200 and res.body:
+        try:
+            out["robots"] = parse_robots(res.body.decode("utf-8", "ignore"))
+        except Exception:
+            pass
+    candidates = list(out["robots"]["sitemaps"]) or [origin + "/sitemap.xml"]
+    seen: set[str] = set()
+    queue = [(u, 0) for u in candidates]
+    while queue and len(out["seed_urls"]) < MAX_SITEMAP_URLS:
+        sm_url, depth = queue.pop(0)
+        if sm_url in seen or depth > max_sitemap_depth:
+            continue
+        seen.add(sm_url)
+        try:
+            sm = await async_fetch_url(client, sm_url)
+        except Exception:
+            continue
+        if sm.error or sm.status_code != 200 or not sm.body:
+            continue
+        pages, nested = parse_sitemap(sm.body)
+        out["seed_urls"].extend(pages)
+        queue.extend((u, depth + 1) for u in nested)
+    return out
+

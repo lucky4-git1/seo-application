@@ -44,7 +44,7 @@ class AppConfig(BaseSettings):
     app_env: str = Field(default="development", alias="APP_ENV")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     api_v1_prefix: str = Field(default="/api/v1", alias="API_V1_PREFIX")
-    cors_origins: str = Field(default="http://localhost:5173,http://localhost:1420", alias="CORS_ORIGINS")
+    cors_origins: str = Field(default="http://localhost:5173,http://localhost:5174,http://localhost:1420", alias="CORS_ORIGINS")
 
     database_url: str = Field(default="postgresql+psycopg://seo:seo@localhost:5432/seo", alias="DATABASE_URL")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
@@ -61,6 +61,14 @@ class AppConfig(BaseSettings):
     google_redirect_uri: str | None = Field(default=None, alias="GOOGLE_REDIRECT_URI")
 
     export_dir: str = Field(default="/tmp/seo-exports", alias="EXPORT_DIR")
+
+    # Presentation mode and crawler settings
+    presentation_mode: bool = Field(default=True, alias="PRESENTATION_MODE")
+    audit_concurrency: int = Field(default=12, alias="AUDIT_CONCURRENCY")
+    audit_max_runtime: int = Field(default=180, alias="AUDIT_MAX_RUNTIME")
+    audit_timeout_total: float = Field(default=20.0, alias="AUDIT_TIMEOUT_TOTAL")
+    audit_timeout_connect: float = Field(default=5.0, alias="AUDIT_TIMEOUT_CONNECT")
+    audit_timeout_read: float = Field(default=15.0, alias="AUDIT_TIMEOUT_READ")
 
     @property
     def cors_origin_list(self) -> list[str]:

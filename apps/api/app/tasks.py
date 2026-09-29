@@ -31,18 +31,35 @@ def _is_retryable(message: str) -> bool:
 @celery.task(name="seo.run_audit", bind=True, max_retries=3)
 def run_audit_task(self, job_id: str, run_id: str, max_pages: int = 200) -> dict:
     """Crawl a project's domain, then evaluate audit rules. Returns summary."""
+    import app.recommendations as reco_engine
+
     Session = get_session_factory()
     db = Session()
     try:
         job = db.get(Job, uuid.UUID(job_id))
-        if job is None:
-            return {"ok": False, "error": "job not found"}
+        run = db.get(seo_models.CrawlRun, uuid.UUID(run_id))
+        if job is None or run is None:
+            return {"ok": False, "error": "job or crawl run not found"}
         jobstore.mark_running(db, job)
         try:
             crawl_engine.run_crawl(db, uuid.UUID(run_id), max_pages=max_pages)
+            db.refresh(run)
+            if run.status == "CANCELLED":
+                jobstore.mark_failed(db, job, "Audit cancelled by user")
+                return {"ok": False, "status": "CANCELLED"}
             summary = audit_engine.run_audit(db, uuid.UUID(run_id))
+            try:
+                reco_engine.collect_audit(db, run.organization_id, run.project_id)
+                db.commit()
+            except Exception:
+                pass
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
+            db.refresh(run)
+            if run and run.status not in ("COMPLETED", "CANCELLED"):
+                run.status = "FAILED"
+                run.error = message[:2000]
+                db.commit()
             if _is_retryable(message):
                 job.retry_count = (job.retry_count or 0) + 1
                 db.commit()
